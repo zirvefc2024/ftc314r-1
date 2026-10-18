@@ -3,8 +3,16 @@
 """
 
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from data.schedule import SCHEDULE, DAY_NAMES
 from config import START_DATE
+
+BAKU_TZ = ZoneInfo("Asia/Baku")
+
+
+def get_baku_today() -> date:
+    """Возвращает текущую дату по времени Баку."""
+    return datetime.now(BAKU_TZ).date()
 
 
 def get_week_type(target_date: date = None) -> str:
@@ -14,7 +22,7 @@ def get_week_type(target_date: date = None) -> str:
     Считаем от понедельника той же недели (14.09.2026).
     """
     if target_date is None:
-        target_date = date.today()
+        target_date = get_baku_today()
 
     start = datetime.strptime(START_DATE, "%Y-%m-%d").date()
     # Находим понедельник недели, в которую попал START_DATE
@@ -76,4 +84,4 @@ async def format_week(start_date: date, lang: str = "ru") -> str:
 
 
 def get_tomorrow() -> date:
-    return date.today() + timedelta(days=1)
+    return get_baku_today() + timedelta(days=1)

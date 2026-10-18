@@ -34,7 +34,7 @@ from utils.database import (
 )
 from utils.schedule_utils import (
     format_day_schedule, get_tomorrow, get_week_type,
-    get_schedule_for_date, format_week,
+    get_schedule_for_date, format_week, get_baku_today,
 )
 from utils.weather import get_tomorrow_weather
 from data.schedule import SCHEDULE
@@ -172,15 +172,15 @@ async def schedule_callback(callback: CallbackQuery):
     action = callback.data.split("_")[1]
 
     if action == "today":
-        text = format_day_schedule(date.today(), lang)
+        text = format_day_schedule(get_baku_today(), lang)
     elif action == "tomorrow":
         text = format_day_schedule(get_tomorrow(), lang)
         weather = await get_tomorrow_weather()
         text += f"\n\n🌤 {t('weather', lang)}: {weather}"
     elif action == "this":
-        text = await format_week(date.today(), lang)
+        text = await format_week(get_baku_today(), lang)
     elif action == "next":
-        text = await format_week(date.today() + timedelta(days=7), lang)
+        text = await format_week(get_baku_today() + timedelta(days=7), lang)
     else:
         text = "—"
 
@@ -475,7 +475,7 @@ def schedule_today_reminders():
     """Планирует уведомления за 5 минут до каждой пары сегодня.
     Более надёжная версия: подробное логирование и защита от дублей.
     """
-    today = date.today()
+    today = get_baku_today()
     lessons = get_schedule_for_date(today)
     scheduled = 0
     for les in lessons:
