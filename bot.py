@@ -26,7 +26,7 @@ from aiogram.fsm.state import State, StatesGroup
 from locales.strings import t
 from utils.database import (
     init_db, add_or_update_user, set_language, get_user_lang,
-    is_approved, approve_user, get_approved_users, is_admin,
+    is_approved, approve_user, is_admin,
     add_material, get_materials, save_response, get_responses,
 )
 from utils.schedule_utils import (
@@ -276,30 +276,6 @@ async def process_text(message: Message, state: FSMContext):
     )
 
 
-async def notify_new_material(subject: str, mtype: str, title: str):
-    """Отправляет уведомление всем одобренным пользователям о новом материале."""
-    users = await get_approved_users()
-    mtype_label = "Задание" if mtype == "hw" else "Конспект"
-    title_text = title or "Без названия"
-
-    for uid in users:
-        try:
-            lang = await get_user_lang(uid)
-            # Простая локализация типа
-            if lang == "az":
-                mtype_label_local = "Tapşırıq" if mtype == "hw" else "Konspekt"
-            else:
-                mtype_label_local = mtype_label
-
-            text = (
-                f"{t('new_material', lang)}\n\n"
-                f"{t('new_material_body', lang).format(subject=subject, mtype=mtype_label_local, title=title_text)}"
-            )
-            await bot.send_message(uid, text)
-        except Exception as e:
-            logging.error(f"New material notify error {uid}: {e}")
-
-
 @dp.message(AddMaterial.file, F.document | F.photo)
 async def process_file(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -326,9 +302,6 @@ async def process_file(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("✅ Материал успешно добавлен!")
 
-    # Уведомляем всех
-    await notify_new_material(data["subject"], data["mtype"], data.get("title"))
-
 
 @dp.message(AddMaterial.file, F.text == "/skip")
 async def process_skip_file(message: Message, state: FSMContext):
@@ -345,9 +318,6 @@ async def process_skip_file(message: Message, state: FSMContext):
     )
     await state.clear()
     await message.answer("✅ Материал успешно добавлен (без файла)!")
-
-    # Уведомляем всех
-    await notify_new_material(data["subject"], data["mtype"], data.get("title"))
 
 
 @dp.message(Command("cancel"))
@@ -439,3 +409,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+# tarabanim
