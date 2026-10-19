@@ -153,3 +153,5 @@ async def get_responses(lesson_key: str):
             WHERE r.lesson_key = ?
         """, (lesson_key,)) as cur:
             return await cur.fetchall()
+
+# updated
