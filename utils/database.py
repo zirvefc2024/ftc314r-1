@@ -3,10 +3,12 @@
 Пользователи, язык, материалы, ответы на уведомления
 """
 
+import os
 import aiosqlite
 from datetime import datetime
 
-DB_PATH = "schedule_bot.db"  # Хранится в рабочей директории бота. На хостинге с постоянным диском данные не пропадут.
+# Сохраняем базу в постоянное хранилище Amvera (/data)
+DB_PATH = "/data/schedule_bot.db"
 
 
 async def init_db():
@@ -90,10 +92,19 @@ async def approve_user(user_id: int, role: str = "student"):
         await db.commit()
 
 
-async def get_approved_users():
+async def get_all_users():
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT user_id FROM users WHERE approved = 1") as cur:
-            return [row[0] async for row in cur]
+        async with db.execute(
+            "SELECT user_id, username, full_name, role, approved FROM users ORDER BY created_at"
+        ) as cur:
+            return await cur.fetchall()
+
+
+async def delete_user(user_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+        await db.execute("DELETE FROM responses WHERE user_id = ?", (user_id,))
+        await db.commit()
 
 
 async def is_admin(user_id: int) -> bool:

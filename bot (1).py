@@ -11,7 +11,7 @@
 
 import asyncio
 import logging
-from datetime import date, datetime, timedelta
+from datetime import timedelta
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
@@ -22,15 +22,13 @@ from aiogram.types import (
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.date import DateTrigger
 
 from locales.strings import t
 from utils.database import (
     init_db, add_or_update_user, set_language, get_user_lang,
     is_approved, approve_user, get_approved_users, is_admin,
     add_material, get_materials, save_response, get_responses,
+    get_all_users, delete_user,
 )
 from utils.schedule_utils import (
     format_day_schedule, get_tomorrow, get_week_type,
@@ -56,7 +54,6 @@ if not BOT_TOKEN or CREATOR_ID == 0:
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-scheduler = AsyncIOScheduler(timezone="Asia/Baku")
 
 
 class AddMaterial(StatesGroup):
@@ -130,28 +127,19 @@ async def cmd_start(message: Message):
 async def set_lang(callback: CallbackQuery):
     lang = callback.data.split("_")[1]
     await set_language(callback.from_user.id, lang)
+    # Автоматическое одобрение
+    await approve_user(callback.from_user.id, role="student")
     await callback.message.edit_text(t("lang_set", lang))
-    await callback.message.answer(t("welcome", lang))
-    # Уведомляем создателя
-    await bot.send_message(
-        CREATOR_ID,
-        f"Новый пользователь: {callback.from_user.full_name} (@{callback.from_user.username})\n"
-        f"ID: {callback.from_user.id}\nОдобрить: /approve {callback.from_user.id}"
-    )
-
-
-@dp.message(Command("approve"))
-async def cmd_approve(message: Message):
-    if message.from_user.id != CREATOR_ID and message.from_user.id not in STAROSTA_IDS:
-        return
+    await callback.message.answer(t("welcome", lang), reply_markup=main_menu(lang))
+    # Уведомляем создателя о новом пользователе
     try:
-        user_id = int(message.text.split()[1])
-        await approve_user(user_id)
-        lang = await get_user_lang(user_id)
-        await bot.send_message(user_id, t("approved", lang), reply_markup=main_menu(lang))
-        await message.answer("Пользователь одобрен.")
+        await bot.send_message(
+            CREATOR_ID,
+            f"Новый пользователь (автоодобрен): {callback.from_user.full_name} (@{callback.from_user.username})\n"
+            f"ID: {callback.from_user.id}"
+        )
     except Exception:
-        await message.answer("Использование: /approve <user_id>")
+        pass
 
 
 @dp.message(F.text.in_([t("btn_schedule", "ru"), t("btn_schedule", "az")]))
@@ -379,17 +367,42 @@ async def set_starosta(message: Message):
         uid = int(message.text.split()[1])
         await approve_user(uid, role="starosta")
         await message.answer(f"Пользователь {uid} назначен старостой.")
-        await bot.send_message(uid, "Вас назначили старостой. Теперь вы можете добавлять материалы.")
+        try:
+            await bot.send_message(uid, "Вас назначили старостой. Теперь вы можете добавлять материалы.")
+        except Exception:
+            pass
     except Exception:
         await message.answer("Использование: /setstarosta <user_id>")
 
 
-@dp.message(Command("pending"))
-async def list_pending(message: Message):
+@dp.message(Command("users"))
+async def list_users(message: Message):
     if message.from_user.id != CREATOR_ID:
         return
-    # Простая выборка не одобренных (можно расширить)
-    await message.answer("Функция списка ожидающих будет добавлена позже. Используйте уведомления при /start.")
+    users = await get_all_users()
+    if not users:
+        await message.answer("Пользователей пока нет.")
+        return
+    text = "👥 Пользователи:\n\n"
+    for uid, username, full_name, role, approved in users:
+        name = full_name or username or "—"
+        text += f"• {name} | ID: {uid} | роль: {role}\n"
+    await message.answer(text)
+
+
+@dp.message(Command("delete"))
+async def cmd_delete(message: Message):
+    if message.from_user.id != CREATOR_ID:
+        return
+    try:
+        uid = int(message.text.split()[1])
+        if uid == CREATOR_ID:
+            await message.answer("Нельзя удалить создателя.")
+            return
+        await delete_user(uid)
+        await message.answer(f"Пользователь {uid} удалён.")
+    except Exception:
+        await message.answer("Использование: /delete <user_id>")
 
 
 
@@ -434,126 +447,6 @@ async def view_responses(callback: CallbackQuery):
     await callback.answer()
 
 
-# ====================== УВЕДОМЛЕНИЯ ======================
-
-async def send_evening_notification():
-    tomorrow = get_tomorrow()
-    weather = await get_tomorrow_weather()
-    users = await get_approved_users()
-
-    for uid in users:
-        try:
-            lang = await get_user_lang(uid)
-            text = format_day_schedule(tomorrow, lang)
-            full = f"🌙 {t('evening_title', lang)}\n\n{text}\n\n🌤 {weather}"
-            await bot.send_message(uid, full)
-        except Exception as e:
-            logging.error(f"Evening notify error {uid}: {e}")
-
-
-async def send_lesson_reminder(lesson: dict, lesson_date: date, lesson_key: str):
-    users = await get_approved_users()
-    for uid in users:
-        try:
-            lang = await get_user_lang(uid)
-            text = (
-                f"⏰ Через 5 минут:\n"
-                f"{lesson['subject']}\n"
-                f"{t('teacher', lang)}: {lesson['teacher']}\n"
-                f"{t('room', lang)}: {lesson['room']}"
-            )
-            await bot.send_message(
-                uid,
-                text,
-                reply_markup=response_keyboard(lesson_key, lang),
-            )
-        except Exception as e:
-            logging.error(f"Reminder error {uid}: {e}")
-
-
-def schedule_today_reminders():
-    """Планирует уведомления за 5 минут до каждой пары сегодня.
-    Более надёжная версия: подробное логирование и защита от дублей.
-    """
-    today = get_baku_today()
-    lessons = get_schedule_for_date(today)
-    scheduled = 0
-    for les in lessons:
-        start_str = les["time"].split("–")[0].strip()
-        try:
-            hour, minute = map(int, start_str.split(":"))
-            remind_dt = datetime.combine(today, datetime.min.time()).replace(
-                hour=hour, minute=minute
-            ) - timedelta(minutes=5)
-
-            if remind_dt <= datetime.now():
-                continue
-
-            # Короткий и безопасный id
-            safe_subj = "".join(c for c in les["subject"] if c.isalnum() or c in " _")[:20]
-            lesson_key = f"{today.isoformat()}_{start_str}_{safe_subj}"
-            job_id = f"rem_{lesson_key}"
-
-            scheduler.add_job(
-                send_lesson_reminder,
-                DateTrigger(run_date=remind_dt),
-                args=[les, today, lesson_key],
-                id=job_id,
-                replace_existing=True,
-                misfire_grace_time=60,  # если опоздали на 1 минуту — всё равно отправит
-            )
-            scheduled += 1
-            logging.info(f"Запланировано напоминание: {lesson_key} на {remind_dt}")
-        except Exception as e:
-            logging.warning(f"Не удалось запланировать напоминание для {les.get('subject')}: {e}")
-
-    logging.info(f"Всего запланировано напоминаний на сегодня: {scheduled}")
-
-
-async def send_evening_notification():
-    tomorrow = get_tomorrow()
-    weather = await get_tomorrow_weather()
-    users = await get_approved_users()
-    success = 0
-    failed = 0
-
-    for uid in users:
-        try:
-            lang = await get_user_lang(uid)
-            text = format_day_schedule(tomorrow, lang)
-            full = f"🌙 {t('evening_title', lang)}\n\n{text}\n\n🌤 {weather}"
-            await bot.send_message(uid, full)
-            success += 1
-        except Exception as e:
-            failed += 1
-            logging.error(f"Evening notify error {uid}: {e}")
-
-    logging.info(f"Вечернее уведомление: успешно {success}, ошибок {failed}")
-
-
-async def send_lesson_reminder(lesson: dict, lesson_date: date, lesson_key: str):
-    users = await get_approved_users()
-    success = 0
-    for uid in users:
-        try:
-            lang = await get_user_lang(uid)
-            text = (
-                f"⏰ Через 5 минут:\n"
-                f"{lesson['subject']}\n"
-                f"{t('teacher', lang)}: {lesson['teacher']}\n"
-                f"{t('room', lang)}: {lesson['room']}"
-            )
-            await bot.send_message(
-                uid,
-                text,
-                reply_markup=response_keyboard(lesson_key, lang),
-            )
-            success += 1
-        except Exception as e:
-            logging.error(f"Reminder error {uid}: {e}")
-    logging.info(f"Напоминание {lesson_key}: отправлено {success} пользователям")
-
-
 # ====================== ЗАПУСК ======================
 
 async def main():
@@ -562,28 +455,14 @@ async def main():
     await add_or_update_user(CREATOR_ID, "", "Creator")
     await approve_user(CREATOR_ID, role="creator")
 
-    scheduler.add_job(
-        send_evening_notification,
-        CronTrigger(hour=20, minute=30, timezone="Asia/Baku"),
-        id="evening",
-        replace_existing=True,
-    )
-    # Каждый день в 00:05 планируем напоминания на этот день
-    scheduler.add_job(
-        schedule_today_reminders,
-        CronTrigger(hour=0, minute=5, timezone="Asia/Baku"),
-        id="plan_reminders",
-        replace_existing=True,
-    )
-    scheduler.start()
-    schedule_today_reminders()  # на сегодня сразу
-
-    logging.info("Бот успешно запущен")
+    logging.info("Бот успешно запущен (без автоматических уведомлений)")
     try:
         await bot.send_message(
             CREATOR_ID,
-            "✅ Бот запущен и готов к работе.\n"
-            "Напоминания на сегодня пересозданы."
+            "✅ Бот запущен.\n"
+            "Автоуведомления отключены.\n"
+            "Пользователи одобряются автоматически.\n"
+            "Команды: /users /setstarosta /delete"
         )
     except Exception:
         logging.warning("Не удалось отправить сообщение создателю о запуске")
