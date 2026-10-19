@@ -28,7 +28,6 @@ from utils.database import (
     init_db, add_or_update_user, set_language, get_user_lang,
     is_approved, approve_user, get_approved_users, is_admin,
     add_material, get_materials, save_response, get_responses,
-    get_all_users, delete_user,
 )
 from utils.schedule_utils import (
     format_day_schedule, get_tomorrow, get_week_type,
@@ -375,38 +374,6 @@ async def set_starosta(message: Message):
         await message.answer("Использование: /setstarosta <user_id>")
 
 
-@dp.message(Command("users"))
-async def list_users(message: Message):
-    if message.from_user.id != CREATOR_ID:
-        return
-    users = await get_all_users()
-    if not users:
-        await message.answer("Пользователей пока нет.")
-        return
-    text = "👥 Пользователи:\n\n"
-    for uid, username, full_name, role, approved in users:
-        name = full_name or username or "—"
-        text += f"• {name} | ID: {uid} | роль: {role}\n"
-    await message.answer(text)
-
-
-@dp.message(Command("delete"))
-async def cmd_delete(message: Message):
-    if message.from_user.id != CREATOR_ID:
-        return
-    try:
-        uid = int(message.text.split()[1])
-        if uid == CREATOR_ID:
-            await message.answer("Нельзя удалить создателя.")
-            return
-        await delete_user(uid)
-        await message.answer(f"Пользователь {uid} удалён.")
-    except Exception:
-        await message.answer("Использование: /delete <user_id>")
-
-
-
-@dp.callback_query(F.data.startswith("resp_"))
 async def handle_response(callback: CallbackQuery):
     if not await is_approved(callback.from_user.id):
         return
@@ -462,7 +429,7 @@ async def main():
             "✅ Бот запущен.\n"
             "Автоуведомления отключены.\n"
             "Пользователи одобряются автоматически.\n"
-            "Команды: /users /setstarosta /delete"
+            "Команды: /setstarosta"
         )
     except Exception:
         logging.warning("Не удалось отправить сообщение создателю о запуске")

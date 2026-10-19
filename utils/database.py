@@ -92,6 +92,12 @@ async def approve_user(user_id: int, role: str = "student"):
         await db.commit()
 
 
+async def get_approved_users():
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT user_id FROM users WHERE approved = 1") as cur:
+            return [row[0] async for row in cur]
+
+
 async def get_all_users():
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
@@ -154,4 +160,4 @@ async def get_responses(lesson_key: str):
         """, (lesson_key,)) as cur:
             return await cur.fetchall()
 
-# updated
+# fix
